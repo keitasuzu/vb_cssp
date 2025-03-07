@@ -1,12 +1,12 @@
-function [H, Pe, Hfilt, C, FE, removed_ch] = vbCSSP(B, S, Nmax, tol_per, remove_negative, correct_amp)
+function [H, Pe, Hfilt, C, FE, removed_ch] = vbCSSP(B, S, Nmax, tol_per, remove_badch, correct_amp)
 %--- Inputs ---
 % B       : Measurement MEG signals (Nm*Nt)
 %           Saturated signals should be removed before vbCSSP
 % S       : Basis of the noise space (Nm*Nh)
 % Nmax    : Num of max EM-iteration (optional, default=1000)
 % tol_per : Relative threshold for free energy [%] (optional, default=0.005%)
-% remove_negative : If true, channels with negative gains will be removed (optional, default=false)
-% correct_amp : If true, amplitudes of C and H will be corrected using SSP estimation (optional, default=true)
+% remove_badch : If true, channels with negative or outlier gains will be removed (optional, default=false)
+% correct_amp  : If true, amplitudes of C and H will be corrected using SSP estimation (optional, default=true)
 %
 %--- Outputs ---
 % H     : Estimated coefficients of the basis (Nh*Nt)
@@ -18,6 +18,8 @@ function [H, Pe, Hfilt, C, FE, removed_ch] = vbCSSP(B, S, Nmax, tol_per, remove_
 %--- Other variables ---
 % Lam   : Measurement noise precision
 % Gamma : Posterior precision of h
+%
+% 2025/01/24 K.Suzuki Outlier gains (threshold=5MAD) will be rejected as well as negative gains
 %
 % Copyright (C) 2011, ATR All Rights Reserved.
 % K.Suzuki 2024
@@ -34,12 +36,12 @@ if ~exist('tol_per', 'var') || isempty(tol_per)
 end
 tol = tol_per / 100;
 
-% If true, ch with negative gain will be removed
-if ~exist('remove_negative', 'var') || isempty(remove_negative)
-    remove_negative = false;
+% If true, ch with bad (negative or outlier) gain will be removed
+if ~exist('remove_badch', 'var') || isempty(remove_badch)
+    remove_badch = false;
 end
 
-% If true, amplitudes of C and H will be corrected
+% If true, amplitudes of C and H will be corrected by conventional SSP
 if ~exist('correct_amp', 'var') || isempty(correct_amp)
     correct_amp = true;
 end
@@ -143,15 +145,15 @@ while iem < Nmax
 
     if ~rem(iem, 10), disp(['Itr(' num2str(iem) '): FE = ' num2str(FE(iem)) ', diff(FE) = ' num2str(fediff*100) '[%]']); end
 
-    % If negative C exists, restart iteration by setting badch
-    ixr = diag(C)<0;
-    if any(ixr) && remove_negative
+    % If bad gains (negative or outlier) exist, restart iteration by removing badch
+    ixr = Cd<0 | inner_isoutlier(Cd,'median',5);
+    if any(ixr) && remove_badch
         B(ixr,:) = []; % Remove bad ch
         S(ixr,:) = []; % Remove bad ch
         ixorg = find(~removed_ch); % Original index of active ch
         ixro = ixorg(ixr); % Original index of bad ch
         removed_ch(ixro) = true; % Add to bad ch
-        warning(['Negative gains were detected for ch: ' num2str(ixro') newline ...
+        warning(['Bad gains were detected for ch: ' num2str(ixro') newline ...
                  'Restart iteration'])
         iem = 0; % Restart iteration
         [nt,nm,nh,covmat,icovmat,rho,K,CS,C2,Rbb,lam,Lam] = inner_init(B,S); % Init parms
@@ -175,7 +177,7 @@ if iem==Nmax
     disp(['diff(FE) = ' num2str(fediff)])
 end
 
-if any(removed_ch) && remove_negative
+if any(removed_ch) && remove_badch
     warning(['Total ' num2str(sum(removed_ch)) ' ch were removed'])
 end
 
@@ -248,3 +250,37 @@ Lam = mean(lam).*eye(nm); % Use scalar lam
 % lam = 0.1; % Simple case
 % Lam = lam*eye(nm);
 end % End of function
+
+function outlier = inner_isoutlier(x, method, p)
+
+if ~exist('method','var') || isempty(method)
+    method = 'median';
+end
+
+if ~exist('p','var') || isempty(p)
+    p = 3;
+end
+
+switch method
+    case 'median'
+        % thrsh = p*MAD
+        c = -1 /(sqrt(2)*erfcinv(3/2)); % ~1.4826
+        xcenter = median(x,1,'omitnan');
+        xmad = c*median(abs(x - xcenter), 1, 'omitnan');
+
+        lowerbound = xcenter - p*xmad;
+        upperbound = xcenter + p*xmad;
+    
+    case 'mean'
+        % thresh = p*STD
+        xcenter = mean(x,1,'omitnan');
+        xstd = std(x,0, 1,'omitnan');
+
+        lowerbound = xcenter - p*xstd;
+        upperbound = xcenter + p*xstd;
+end
+
+outlier = x>upperbound | x<lowerbound;
+
+end % End of function
+
