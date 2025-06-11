@@ -119,14 +119,18 @@ while iem < Nmax
     e2 = B.*repmat(diag(Lam_old),[1,nt]);
     e2 = -e2(:)' * B(:); % -sum(b'*Lam*b)
 
-    Hlong1 = repmat(H, [nh,1]);
-    Hlong1 = Hlong1(:); % [h(1)_1 h(1)_2 h(1)_3  h(1)_1 h(1)_2 h(1)_3  h(1)_1 h(1)_2 h(1)_3  h(2)_1 h(2)_2 h(2)_3 ...]
-    Hlong2 = repmat(H(:), [1,nh])';
-    Hlong2 = Hlong2(:); % [h(1)_1 h(1)_1 h(1)_1  h(1)_2 h(1)_2 h(1)_2  h(1)_3 h(1)_3 h(1)_3  h(2)_1 h(2)_1 h(2)_1 ...]
-    Glong  = Gamma(:);
-    Glong  = repmat(Glong, [nt,1]);% [g11 g21 g31  g12 g22 g32  g13 g23 g33 ...]
+    % Compute e3 = sum_t(hbar'*Gam*hbar)
+    % This could be solved using trace easily...
+    % Hlong1 = repmat(H, [nh,1]);
+    % Hlong1 = Hlong1(:); % [h(1)_1 h(1)_2 h(1)_3  h(1)_1 h(1)_2 h(1)_3  h(1)_1 h(1)_2 h(1)_3  h(2)_1 h(2)_2 h(2)_3 ...]
+    % Hlong2 = repmat(H(:), [1,nh])';
+    % Hlong2 = Hlong2(:); % [h(1)_1 h(1)_1 h(1)_1  h(1)_2 h(1)_2 h(1)_2  h(1)_3 h(1)_3 h(1)_3  h(2)_1 h(2)_1 h(2)_1 ...]
+    % Glong  = Gamma(:);
+    % Glong  = repmat(Glong, [nt,1]);% [g11 g21 g31  g12 g22 g32  g13 g23 g33 ...]
+    % e3 = sum( Hlong1 .* Glong .* Hlong2 ); % sum(hbar'*Gam*hbar)
 
-    e3 = sum( Hlong1 .* Glong .* Hlong2 ); % sum(hbar'*Gam*hbar)
+    % tr(Gam*H*H') = tr(Gam*sum_t(h(t)*h'(t))) = sum_t(tr(h'(t)*Gam*h(t))) = sum_t(h'(t)*Gam*h(t))
+    e3 = trace(Gamma * HH);
     e4 = - trace(ECdCd) / rho; % -1/rho tr(iPhi+CdCd')
     e5 = inner_logdet(iPhi); % log|iPhi|
     e6 = -nm*log(rho); % -Mlog(rho)
