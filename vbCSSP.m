@@ -108,7 +108,7 @@ while iem < Nmax
     %-------- End Lambda --------
 
     %------- Update rho and K -------
-    rho = trace(icovmat*ECdCd) / 2*nm;
+    rho = trace(icovmat*ECdCd) / (2*nm);
     % rho = lam;
     % rho = trace(pinv(covmat)*ECdCd) / 2*nm;
     K = covmat .* rho;
