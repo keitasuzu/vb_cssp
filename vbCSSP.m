@@ -5,7 +5,11 @@ function [H, Pe, Hfilt, C, FE, removed_ch] = vbCSSP(B, S, Nmax, tol_per, remove_
 % S       : Basis of the noise space (Nm*Nh)
 % Nmax    : Num of max EM-iteration (optional, default=1000)
 % tol_per : Relative threshold for free energy [%] (optional, default=0.005%)
-% remove_badch : If true, channels with negative or outlier gains will be removed (optional, default=false)
+% remove_badch : Option for bad channel detection (optional, default=false)
+%                {'none', false} : No bad channel detecton
+%                {'negative', true} : Channels with negative gains will be removed
+%                'outlier' : Channels with outlier gains will be removed
+%                'both' : Channels with negative or outlier gains will be removed
 % correct_amp  : If true, amplitudes of C and H will be corrected using SSP estimation (optional, default=true)
 %
 %--- Outputs ---
@@ -18,8 +22,6 @@ function [H, Pe, Hfilt, C, FE, removed_ch] = vbCSSP(B, S, Nmax, tol_per, remove_
 %--- Other variables ---
 % Lam   : Measurement noise precision
 % Gamma : Posterior precision of h
-%
-% 2025/01/24 K.Suzuki Outlier gains (threshold=5MAD) will be rejected as well as negative gains
 %
 % Copyright (C) 2011, ATR All Rights Reserved.
 % K.Suzuki 2024
@@ -36,9 +38,27 @@ if ~exist('tol_per', 'var') || isempty(tol_per)
 end
 tol = tol_per / 100;
 
-% If true, ch with bad (negative or outlier) gain will be removed
-if ~exist('remove_badch', 'var') || isempty(remove_badch)
-    remove_badch = false;
+% Check the option for badch detection
+if ~exist('remove_badch', 'var') || isequal(remove_badch, false) || isempty(remove_badch) || (ischar(remove_badch) && strcmpi(remove_badch, 'none')) || (ischar(remove_badch) && strcmpi(remove_badch, 'false'))
+    % {'none', false, empty}
+    flag_badch = false;
+    criterion_badch = 'none';
+elseif isequal(remove_badch, true) || (ischar(remove_badch) && strcmpi(remove_badch, 'negative')) || (ischar(remove_badch) && strcmpi(remove_badch, 'true'))
+    % {'negative', true}
+    flag_badch = true;
+    criterion_badch = 'negative';
+elseif ischar(remove_badch) && strcmpi(remove_badch, 'outlier')
+    % 'outlier'
+    flag_badch = true;
+    criterion_badch = 'outlier';
+elseif ischar(remove_badch) && strcmpi(remove_badch, 'both')
+    % 'both'
+    flag_badch = true;
+    criterion_badch = 'both';
+else
+    warning(['Specified badch option is invalid.' newline 'No badch detection will be performed.'])
+    flag_badch = false;
+    criterion_badch = 'none';
 end
 
 % If true, amplitudes of C and H will be corrected by conventional SSP
@@ -149,19 +169,28 @@ while iem < Nmax
 
     if ~rem(iem, 10), disp(['Itr(' num2str(iem) '): FE = ' num2str(FE(iem)) ', diff(FE) = ' num2str(fediff*100) '[%]']); end
 
-    % If bad gains (negative or outlier) exist, restart iteration by removing badch
-    ixr = Cd<0 | inner_isoutlier(Cd,'median',5);
-    if any(ixr) && remove_badch
-        B(ixr,:) = []; % Remove bad ch
-        S(ixr,:) = []; % Remove bad ch
-        ixorg = find(~removed_ch); % Original index of active ch
-        ixro = ixorg(ixr); % Original index of bad ch
-        removed_ch(ixro) = true; % Add to bad ch
-        warning(['Bad gains were detected for ch: ' num2str(ixro') newline ...
-                 'Restart iteration'])
-        iem = 0; % Restart iteration
-        [nt,nm,nh,covmat,icovmat,rho,K,CS,C2,Rbb,lam,Lam] = inner_init(B,S); % Init parms
-        continue
+    if flag_badch
+        switch criterion_badch
+            case 'negative'
+                ixr = Cd<0;
+            case 'outlier'
+                ixr = inner_isoutlier(Cd,'median',5);
+            case 'both'
+                ixr = Cd<0 | inner_isoutlier(Cd,'median',5);
+        end
+        % If bad gains exist, restart iteration after removing badch
+        if any(ixr)
+            B(ixr,:) = []; % Remove bad ch
+            S(ixr,:) = []; % Remove bad ch
+            ixorg = find(~removed_ch); % Original index of active ch
+            ixro = ixorg(ixr); % Original index of bad ch
+            removed_ch(ixro) = true; % Add to bad ch
+            warning(['Bad gains were detected for ch: ' num2str(ixro') newline ...
+                'Restart iteration'])
+            iem = 0; % Restart iteration
+            [nt,nm,nh,covmat,icovmat,rho,K,CS,C2,Rbb,lam,Lam] = inner_init(B,S); % Init parms
+            continue
+        end
     end
 
     % Check convergence
@@ -181,7 +210,7 @@ if iem==Nmax
     disp(['diff(FE) = ' num2str(fediff)])
 end
 
-if any(removed_ch) && remove_badch
+if any(removed_ch)
     warning(['Total ' num2str(sum(removed_ch)) ' ch were removed'])
 end
 
@@ -196,7 +225,7 @@ Pe = eye(nm) - CS * Hfilt;
 if correct_amp
     Hssp = (S'*S)\S' * B;
     % Derive coefficient based on norm ratio
-    coef = norm(Hssp) / norm(H);
+    coef = norm(Hssp,'fro') / norm(H,'fro');
     % Coefficient correction
     Cd = Cd ./ coef;
     C = diag(Cd); % Cbar=<C>
